@@ -5,6 +5,7 @@ Context:
 - response1.txt is the implementation inventory extracted from the codebase.
 - response2.txt identifies features added during Senior Project 2.
 - response3.txt is a technical documentation draft generated directly from the codebase.
+- SystemDesign.tex is the .tex file of Semester1.pdf, since the pdf is made using laTEX and may not load the .tex file is less in size
 
 Task:
 Compare Semester1.pdf with the implementation information contained in response1, response2, and response3.
