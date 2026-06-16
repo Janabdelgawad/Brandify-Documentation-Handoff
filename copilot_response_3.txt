@@ -1,0 +1,512 @@
+# Brandify — Technical Documentation (codebase-derived)
+
+Table of contents
+- 1 System Overview
+- 2 Architecture
+  - 2.1 Frontend architecture
+  - 2.2 Backend architecture
+  - 2.3 Database architecture
+  - 2.4 External services and APIs
+  - 2.5 Data flow between components
+- 3 Authentication & Authorization
+  - 3.1 Login and registration flow
+  - 3.2 JWT implementation
+  - 3.3 Session management
+  - 3.4 Role and ownership checks
+- 4 Security Implementation
+  - 4.1 Authentication security
+  - 4.2 Cookie security
+  - 4.3 Input validation and sanitization
+  - 4.4 Rate limiting
+  - 4.5 CORS and Helmet
+  - 4.6 File upload safety
+- 5 Product & Store Management
+  - 5.1 Store creation workflow
+  - 5.2 Store customization (theme & sections)
+  - 5.3 Product CRUD
+  - 5.4 Inventory management
+- 6 Customer Storefront
+  - 6.1 Store rendering & view counting
+  - 6.2 Product browsing & product details
+  - 6.3 Cart & checkout integration (frontend ↔ backend)
+- 7 Payment System
+  - 7.1 Stripe Checkout integration (orders)
+  - 7.2 Subscriptions
+  - 7.3 Purchase workflow and verification
+  - 7.4 Known gaps (webhooks / reconciliation)
+- 8 AI Features
+  - 8.1 Image enhancement pipeline (Python)
+  - 8.2 Marketing generation (Groq)
+  - 8.3 Ad creative generation (Hugging Face + Gemini + Cloudinary)
+  - 8.4 Rate limits and usage controls
+  - 8.5 Subscription gating (available middleware)
+- 9 Order Management
+  - 9.1 Order creation (saved then Stripe session)
+  - 9.2 Order listing for store owners
+  - 9.3 Order status updates
+- 10 User Interface & Experience
+  - 10.1 Dashboard pages
+  - 10.2 Store builder UI integration points
+  - 10.3 Image enhancer and creative generator UIs
+- 11 Database Design
+  - 11.1 Main collections/models
+  - 11.2 Entity relationships
+  - 11.3 Persistence and indexing notes
+- 12 Deployment & Infrastructure
+  - 12.1 Environment variables required
+  - 12.2 Python environment for enhancement
+  - 12.3 Build & run hints
+  - 12.4 Production considerations
+- 13 Third-Party Dependencies
+- 14 Limitations & Future Enhancements (codebase-inferred)
+- Appendix: key files and endpoints
+
+---
+
+1. System Overview
+- Purpose
+  - Brandify is implemented as a modular SaaS platform that enables merchants to create stores, manage product catalogs, accept payments, and use integrated AI for (a) marketing content generation, (b) product image enhancement, and (c) automated ad creative generation.
+  - Implementation is split across a React/Vite frontend and a Node/Express backend; an isolated Python image-enhancement pipeline is used for background removal and shadow synthesis.
+- Main capabilities (implemented)
+  - User registration, email verification, login/logout, password reset (auth.js).
+  - Store creation and builder updates (theme/sections) (stores.js).
+  - Product CRUD with Cloudinary-backed image uploads (products.js, upload.js).
+  - Order creation and Stripe Checkout session generation (orders.js).
+  - Subscription Checkout session creation and a test `verify` endpoint (subscription.js).
+  - AI marketing endpoints: campaign ideas, content calendar, trending, A/B tests (ai.js).
+  - Image enhancement endpoint that runs a Python pipeline and uploads to Cloudinary (enhance.js + main.py).
+  - AI ad creative generator that composes product with generated empty backgrounds, overlays CTA and text, and uploads results to Cloudinary (creative.js + Enhancement pipeline).
+- User roles (as implemented)
+  - Authenticated user (seller/store owner): creates store, products, views store dashboard, manages orders.
+  - No explicit admin role is defined in the data model; permissions are implemented by checking ownership (e.g., `store.user === req.user.id`) in relevant routes.
+
+---
+
+2. Architecture
+
+2.1 Frontend architecture
+- Stack: React + Vite; UI uses Tailwind CSS and Framer Motion. See frontend and src.
+- API client: api.js creates an axios instance with `baseURL` `http://localhost:5000/api` and `withCredentials: true`. It also injects `x-auth-token` from `localStorage` into requests.
+- Pages and components:
+  - Dashboard pages: AICreativeGenerator.jsx, ImageEnhancer.jsx, `Marketing.jsx`, `Products.jsx`, `Orders.jsx`, `StoreBuilder.jsx`, `CreateStore.jsx`.
+  - Storefront pages: StorePreview.jsx, `ProductDetails.jsx`, checkout pages `Checkout.jsx`, `OrderSuccess.jsx`.
+- UX: Frontend forms send multipart form-data for image uploads (creative & enhancer), and standard JSON payloads for other endpoints.
+
+2.2 Backend architecture
+- Node.js + Express API server in server.js with modular route files under routes.
+- Key routes mounted in server.js:
+  - `/api/auth`, `/api/stores`, `/api/products`, `/api/ai`, `/api/stats`, `/api/orders`, `/api/enhance`, `/api/subscription`, `/api/creative`.
+- Middleware:
+  - `cookie-parser` for cookies.
+  - `helmet()` for basic HTTP header hardening.
+  - `cors` configured for the frontend origin (see 4.5).
+  - `auth` middleware (auth.js) verifies JWT from cookie or `x-auth-token` header.
+  - `upload` middleware (upload.js) uses Cloudinary storage for product files.
+  - `checkSubscription` middleware exists (checkSubscription.js) to validate active subscriptions (present but not widely applied across routes in codebase).
+- Python integration:
+  - Routes enhance.js and creative.js spawn the Python script main.py for background removal and mask/shadow generation.
+
+2.3 Database architecture
+- MongoDB via Mongoose.
+- Connection helper: db.js uses `process.env.MONGO_URI`.
+
+2.4 External services and APIs (observed)
+- Cloudinary: image storage for product uploads, enhanced outputs, and generated creatives (upload.js, enhance.js, creative.js).
+- Stripe: payments for orders and subscription sessions (orders.js, subscription.js).
+- Groq SDK: LLM-based marketing generation (ai.js uses `groq-sdk`).
+- Hugging Face inference API: image generation model `black-forest-labs/FLUX.1-dev` used in creative.js.
+- Pollinations: fallback image generation (HTTP GET fallback used when HF fails) in creative.js.
+- Gemini Vision (Google Generative Language API): image analysis (product description extraction) used in creative.js.
+- Email (Nodemailer): SMTP transport using `EMAIL_*` env vars to send verification and reset emails in auth.js.
+
+2.5 Data flow between components (high-level)
+- User (frontend) → API:
+  - Auth requests to `/api/auth/*` handle registration, verification, login, etc.
+  - Seller actions (create store, create products) call store/products routes with `auth` token/cookie.
+  - Image-based flows:
+    - Image Enhancer: frontend uploads image → `POST /api/enhance/image` → server writes temp file → spawns main.py → Python writes enhanced file → server uploads to Cloudinary and returns `imageUrl`.
+    - Creative Generator: frontend uploads product image + parameters → `POST /api/creative/generate` → server performs: Cloudinary upload (original), run enhancement script to produce transparent product, Gemini vision analysis, call HF/ Pollinations to generate background, composite via `sharp`, upload final creative to Cloudinary → server responds with creative URLs.
+- Orders / payment:
+  - Frontend constructs order and calls `POST /api/orders/create-checkout-session` → server saves order in DB, decrements product stock, increments store.sales, creates Stripe Checkout session (client receives session URL to redirect customer).
+  - Note: reconciliation of Stripe session → order completion requires webhooks (see Limitations).
+
+---
+
+3. Authentication & Authorization
+
+3.1 Login and registration flow
+- Registration (`POST /api/auth/register`)
+  - Validates input via `express-validator`.
+  - Creates `User` document with `isVerified: false` and a `verificationToken`.
+  - Sends verification email via `nodemailer` to the address with a verification link pattern `http://localhost:5173/verify-email/:token`.
+- Email verification (`GET /api/auth/verify/:token`)
+  - Finds `User` by token, sets `isVerified = true`, clears `verificationToken`.
+- Login (`POST /api/auth/login`)
+  - Rate limited (5 attempts / 15 minutes).
+  - Verifies credentials, ensures `isVerified`.
+  - Signs a JWT (`jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "1h" })`).
+  - Sets cookie `token` with:
+    - `httpOnly: true`
+    - `secure: process.env.NODE_ENV === "production"`
+    - `sameSite: "strict"`
+    - `maxAge: 3600000` (1 hour)
+  - Also returns the token in JSON `{ token }` (frontend stores in `localStorage` and sets `x-auth-token` on requests via `api` interceptor).
+- Logout (`POST /api/auth/logout`)
+  - Clears cookie by setting `token` to empty with expired date.
+
+3.2 JWT implementation
+- Token payload: `{ user: { id: user.id } }`.
+- Token verification is in auth.js. It accepts either cookie `token` or header `x-auth-token`. If missing or invalid, returns 401.
+
+3.3 Session management
+- Session is stateless JWT with cookie and optional header.
+- Token expiry enforced at creation (1 hour).
+- No server-side refresh token mechanism implemented in codebase.
+
+3.4 Role-based permissions
+- No explicit role field in `User` model.
+- Authorization is enforced by ownership checks:
+  - Many routes find the `Store` tied to `req.user.id` and verify `store.user.toString() === req.user.id` before allowing updates (e.g., `PUT /api/stores/:id/update-builder`, `PUT /api/orders/:id/status`, product updates/delete).
+- `checkSubscription` middleware exists to deny features to users without `subscriptionStatus === 'active'`, but it is not applied universally across AI routes by default.
+
+---
+
+4. Security Implementation
+
+4.1 Authentication security
+- Passwords hashed with `bcryptjs` before storing (`auth.register`).
+- JWT secret used for token signing (`process.env.JWT_SECRET`) and verification in `auth` middleware.
+- Email verification prevents login until `isVerified` is true.
+
+4.2 Cookie security
+- Cookies set with `httpOnly: true`.
+- `secure` flag set when `NODE_ENV === "production"`.
+- `sameSite: "strict"` is applied.
+
+4.3 Input validation and sanitization
+- `express-validator` is used on auth routes for basic validation (registration, login).
+- `mongoSanitize` and `xss-clean` are present but commented out in server.js (`// app.use(mongoSanitize()); // app.use(xss());`) — therefore sanitization middleware is not active in the running code.
+
+4.4 Rate limiting
+- Login rate limiter: `express-rate-limit` configured in auth.js to limit login attempts (5 per 15 minutes).
+- Creative generation rate limiter: `creativeRateLimiter` in creative.js (10 requests per minute per user or IP).
+- These are applied at route-level where configured.
+
+4.5 CORS and Helmet
+- `helmet()` is applied in server.js.
+- `cors` is configured with:
+  - `origin: "http://localhost:5173"`
+  - `credentials: true`
+  - allowed methods and headers enumerated.
+- `express.json({ limit: "10mb" })` limits request body size.
+
+4.6 File upload safety
+- Product uploads: upload.js uses Cloudinary storage with allowed formats and file size limit 5MB.
+- Creative & enhancer endpoints: use Multer with file size limits (15MB) and MIME-type checks; creative.js uses memory storage and validates allowed MIME types.
+- File writes during enhancement use OS temp directories; cleanup functions attempt to delete temp files after processing.
+
+---
+
+5. Product & Store Management
+
+5.1 Store creation workflow
+- Endpoint `POST /api/stores/create`:
+  - Requires `auth`.
+  - Creates a `Store` linked to `req.user.id` if the user does not already have an existing store.
+  - `subdomain` generated from `storeName` (lowercased, spaces → hyphens, non-word chars removed).
+  - File: stores.js.
+
+5.2 Store customization
+- Endpoint `PUT /api/stores/:id/update-builder`:
+  - Allows updating `theme` and `sections` (`navbar`, `hero`, `footer`) with partial merges.
+  - Authorization enforced by comparing `store.user` to `req.user.id`.
+  - `Store` schema (Store.js) contains nested `theme` and `sections` with defaults.
+
+5.3 Product CRUD operations
+- Create product: `POST /api/products` (`auth`, Cloudinary-backed `upload.array("images", 5)`)
+  - Accepts `name`, `description`, `price`, `category`, `stock`, and up to 5 images.
+  - Saves `images` array and sets `image` to first image.
+- Update: `PUT /api/products/:id` (`auth`, upload array) supports:
+  - Merging `existingImages` + new images (max 5).
+  - Authorization requires the product belongs to the user's store.
+- Read product(s):
+  - `GET /api/products` returns products of the authenticated user's store.
+  - `GET /api/products/:id` public product fetch by id.
+- Delete product: `DELETE /api/products/:id` requires ownership.
+- File: products.js, Cloudinary configuration in upload.js.
+
+5.4 Inventory management
+- `Product` model includes `stock` (default 0).
+- On order creation (`POST /api/orders/create-checkout-session`), server decrements product `stock` via `$inc: { stock: -item.quantity }`.
+
+---
+
+6. Customer Storefront
+
+6.1 Product browsing
+- Store public view:
+  - `GET /api/stores/view/:subdomain` returns store data and `Product` list.
+  - Accepts `?recordView=true` param to increment `views` counter.
+  - File: stores.js.
+
+6.2 Product details
+- `GET /api/products/:id` returns product document (images, price, description).
+
+6.3 Cart functionality and checkout workflow (implemented pieces)
+- Cart is frontend-managed; checkout triggers backend order session:
+  - Frontend should send store subdomain, customer details, items, totalAmount to `POST /api/orders/create-checkout-session`.
+  - Backend persists an `Order` document with `status: "pending"`, adjusts stock, updates `store.sales`, and creates Stripe Checkout session. `client_reference_id` set to the saved order ID for correlation.
+
+---
+
+7. Payment System
+
+7.1 Payment provider integration
+- Stripe is used:
+  - orders.js uses `const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY)` to create Checkout sessions for one-time payments.
+  - subscription.js creates checkout sessions for subscription plans (uses a test secret hard-coded in file — see 14 Limitations).
+- Order sessions return `session.url` to frontend for redirect.
+
+7.2 Subscription plans
+- `User` model includes `subscriptionPlan`, `subscriptionStatus`, `stripeCustomerId`, and `subscriptionEndDate`.
+- `POST /api/subscription/create-checkout-session` builds a Stripe subscription Checkout session with plan price id selection.
+- `POST /api/subscription/verify` exists as a testing bypass that directly sets `user.subscriptionPlan`, marks `subscriptionStatus = "active"`, and sets `subscriptionEndDate` (monthly/yearly). This endpoint is explicitly a test/dev bypass.
+
+7.3 Purchase workflow
+- Order flow:
+  - Save order → decrement stock → create Stripe Checkout session with `client_reference_id` referencing order._id → frontend redirects to session URL.
+- There is no implemented webhook handler to update order status after Stripe notifies successful payment (see 7.4).
+
+7.4 Payment verification
+- The codebase does not implement Stripe webhook handlers to reconcile payment status back into Orders or Users. Orders are initially saved as `pending` and must be reconciled via webhook in production.
+
+---
+
+8. AI Features
+
+8.1 Image enhancement (Python pipeline)
+- Python pipeline located under Enhancement:
+  - main.py is invoked with `-i` input path, `-o` output path, and `--bg` background option.
+  - pipeline.py uses `rembg`, `Pillow`, `opencv-python`, `numpy` to remove backgrounds, generate shadows, and synthesize backgrounds.
+  - requirements.txt lists `rembg[cpu]`, `Pillow`, `opencv-python`, `numpy`.
+- Backend usage:
+  - `POST /api/enhance/image` (enhance.js) saves uploaded file to temp, runs Python script, uploads output to Cloudinary, returns `imageUrl`.
+  - creative.js also runs the same pipeline to produce a transparent product image for compositing.
+
+8.2 Marketing generation
+- ai.js implements LLM-powered marketing utilities using `groq-sdk` and `process.env.GROQ_API_KEY`:
+  - `/api/ai/campaign-ideas` — returns multiple campaign idea entries.
+  - `/api/ai/content-calendar` — creates dated content calendar (1 or 2 weeks).
+  - `/api/ai/trending` — returns trending formats, hooks, hashtags.
+  - `/api/ai/ab-test` — returns A/B test ideas.
+- Prompts are programmatically assembled using store/product/order context (reads `Store`, `Product`, `Order` documents).
+
+8.3 Ad creative generation
+- `POST /api/creative/generate` handles the full creative pipeline:
+  - Accepts product image + campaign inputs from frontend.
+  - Writes input to temp file, runs Python enhancement to remove background and synthesize product shadow (`runEnhancement`).
+  - Uploads original image to Cloudinary.
+  - Analyzes the transparent product with Gemini Vision (Generative Language API) to produce a product description for the prompt (if `GEMINI_API_KEY` present).
+  - Builds structured creative prompt with style maps, scenes, negative prompts and calls image generation API (`black-forest-labs/FLUX.1-dev` on Hugging Face) with `HF_API_KEY`.
+  - Fallback to Pollinations in case HF fails.
+  - Composites generated background with transparent product using `sharp`, overlays offer text and CTA via SVG, color-grades, and uploads final creative(s) to Cloudinary.
+  - Rate-limited (10 requests/min) and uses retries/backoff.
+  - Returns generated creative URLs and metadata.
+- Files: creative.js, `Enhancement/*`.
+
+8.4 AI access restrictions
+- `checkSubscription` middleware exists and will deny access if `User.subscriptionStatus` !== `active`, but it is not applied programmatically across AI endpoints in the codebase (notably the creative.js and ai.js routes include `auth` but do not require `checkSubscription` by default).
+
+8.5 Subscription-based AI usage
+- The codebase provides a subscription model in `User` and subscription.js, but enforcement of subscription gating for AI endpoints must be applied (middleware available but not consistently used).
+
+---
+
+9. Order Management
+
+9.1 Order creation
+- `POST /api/orders/create-checkout-session`
+  - Saves `Order` document with `customer`, `items`, `totalAmount`, `status: "pending"`.
+  - Decrements each `Product.stock` and increments `Store.sales` by `totalAmount`.
+  - Creates Stripe Checkout session for payment with `client_reference_id` set to order._id.
+
+9.2 Order tracking
+- `GET /api/orders/` returns all orders for the authenticated user's store.
+  - Requires `auth` and that a store exists for the user.
+
+9.3 Status management
+- `PUT /api/orders/:id/status` allows updating status (`pending`, `shipped`, `delivered`, `rejected`) by store owner.
+  - Verifies the store owner before permitting updates.
+
+---
+
+10. User Interface & Experience
+
+10.1 Dashboard functionality
+- Dashboard pages available under dashboard:
+  - AICreativeGenerator.jsx — composer UI for creative generation, collects product image and campaign inputs, calls `/api/creative/generate`.
+  - ImageEnhancer.jsx — upload -> enhance flow calling `/api/enhance/image` and offering a before/after preview and download.
+  - `Marketing.jsx` — frontend page uses `/api/ai/*` endpoints to fetch content and calendar (front-end file present; route server-side implemented).
+  - Orders, Products, Store Builder UIs interact with corresponding backend routes.
+
+10.2 Store builder
+- `StoreBuilder.jsx` and store endpoints (`/api/stores/...`) implement builder-like behavior for theme and section updates. The builder data maps directly to `Store` fields (`theme`, `sections`).
+
+10.3 UI design choices reflected in code
+- Client uses color pickers, selects and file uploads. The creative generator includes preview and download flows, progress indicators, and success/error toast messages.
+- API client persists JWT in `localStorage` and also relies on an httpOnly cookie for authentication.
+
+---
+
+11. Database Design
+
+11.1 Main collections/models (implemented)
+- `User` (User.js)
+  - Fields: `name`, `email`, `password`, `isVerified`, `verificationToken`, password reset tokens, subscription fields (`subscriptionPlan`, `subscriptionStatus`, `stripeCustomerId`, `subscriptionEndDate`), timestamps.
+- `Store` (Store.js)
+  - Fields: `user` (ref `User`), `storeName`, `subdomain`, `theme` (colors, font), `sections` (`navbar`, `hero`, `footer`), `isPublished`, `views`, `sales`, `lastActive`.
+- `Product` (Product.js)
+  - Fields: `store` (ref `Store`), `name`, `description`, `price`, `images`[], `image`, `category`, `stock`.
+- `Order` (Order.js)
+  - Fields: `store` (ref `Store`), `customer` object (name, email, address, phone), `items` array (product ref, name, price, quantity, image), `totalAmount`, `status` enum, timestamps.
+
+11.2 Entity relationships
+- One-to-one: `User` → `Store` (one store per user enforced in `stores.create`).
+- One-to-many: `Store` → `Product` and `Store` → `Order`.
+- `Order.items.product` references `Product`.
+
+11.3 Data persistence strategy
+- Mongoose models are used for CRUD and aggregations. Aggregations used by stats.js to build weekly & 7-day chart data.
+
+---
+
+12. Deployment & Infrastructure
+
+12.1 Environment variables required (observed in code)
+- `MONGO_URI` — MongoDB connection string.
+- `PORT` — server port (default 5000).
+- `JWT_SECRET` — JWT signing secret.
+- Cloudinary: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`.
+- Stripe: `STRIPE_SECRET_KEY` (used in orders) — note subscription.js contains an additional hard-coded test secret.
+- LLM/AI keys:
+  - `GROQ_API_KEY` (Groq/LLM for marketing)
+  - `HF_API_KEY` (Hugging Face image generation)
+  - `GEMINI_API_KEY` (Gemini Vision image analysis)
+- Email: `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USER`, `EMAIL_PASS` for Nodemailer.
+- `FRONTEND_URL` optional (used for redirect fallback).
+- `NODE_ENV` used to toggle cookie secure flag and control error detail exposure.
+
+12.2 Python environment for enhancement
+- The enhancement pipeline requires Python with `rembg`, `Pillow`, `opencv-python`, and `numpy` (see requirements.txt).
+- Backend spawns main.py. creative.js and enhance.js attempt to use a virtualenv python at `Enhancement/.venv/Scripts/python.exe` (Windows) if present, otherwise falls back to system `python`/`python3`.
+
+12.3 Build & run hints (observed)
+- Backend: typical Node.js server (`node` or `npm start`) boots server.js.
+- Frontend: Vite/react app (package.json present) runs on port `5173` per CORS settings.
+- Python: to use enhancement features you must install the requirements.txt dependencies and ensure Python is available on host.
+
+12.4 Production considerations (from code)
+- Cookie `secure` is applied when `NODE_ENV === "production"`.
+- CORS currently restricts origin to `http://localhost:5173` — must be updated for production.
+- Sensitive secrets must be provided via environment variables.
+- Webhook endpoints for Stripe are not implemented (essential for reconciliation in production).
+
+---
+
+13. Third-Party Dependencies (major libraries and purpose)
+- Backend (Node)
+  - `express` — HTTP server and routing.
+  - `mongoose` — MongoDB ODM.
+  - `cors` — cross-origin requests control.
+  - `helmet` — basic security headers.
+  - `cookie-parser` — cookie parsing middleware.
+  - `bcryptjs` — password hashing.
+  - `jsonwebtoken` — JWT signing and verification.
+  - `nodemailer` — email sending for verification & password resets.
+  - `express-validator` — request validation.
+  - `express-rate-limit` — rate limiting endpoints.
+  - `multer`, `multer-storage-cloudinary` + `cloudinary` — file upload and storage.
+  - `stripe` — payments (Checkout sessions).
+  - `groq-sdk` — LLM calls for marketing generation.
+  - `axios` — HTTP client (used for HF, Gemini, Pollinations calls).
+  - `sharp` — image compositing and transformation.
+- Python (Enhancement)
+  - `rembg`, `Pillow`, `opencv-python`, `numpy` — background removal, image composing, shadow synthesis.
+- Frontend
+  - `react`, `vite` — SPA framework and dev tooling.
+  - `tailwindcss` — styling.
+  - `framer-motion` — animations.
+  - `axios` — API requests.
+  - `react-hot-toast` — notifications.
+  - `lucide-react` — icons.
+
+---
+
+14. Limitations & Future Enhancements (inferred from code)
+- Missing Stripe webhooks: After Checkout sessions are created, there is no webhook listener to confirm payments and update an `Order` from `pending` to `paid` or to set `User` subscription status automatically. (Routes create sessions but do not reconcile results.)
+- Subscription `verify` endpoint bypass: `POST /api/subscription/verify` marks a subscription active directly for testing/dev. This is explicit in code and must be removed or replaced in production with secure verification or webhook-based activation.
+- Sanitization middleware disabled: `mongoSanitize` and `xss-clean` are present but commented out in server.js; input sanitization should be re-enabled.
+- Subscription checks are available as middleware (checkSubscription.js) but are not applied to AI routes by default — subscription gating is not fully enforced.
+- Secrets handling: subscription.js contains a hard-coded Stripe test secret in code; this should be moved to environment variables.
+- Webhook and reconciliation logic for orders/subscriptions is missing — this is required for production-grade payments and subscription lifecycle management.
+- Python dependency & environment: enhancement pipeline requires a Python runtime with native bindings (`rembg`, `opencv-python`) and may require platform-specific installation steps; no installer/script is included to provision the environment automatically.
+- Multi-tenant scaling considerations (storage, background jobs): current creative generation is synchronous within request handlers (long-running image generation and Python process spawn). For production workloads, offloading to background jobs and using asynchronous processing/queues would be recommended.
+- Audit & logging: basic console logging present; no structured logging, error monitoring, or observability integration is implemented.
+- Duplicate creative route subtree: there is also creative.js at repository root (duplicate implementation artifact). Consolidate to avoid confusion.
+
+---
+
+Appendix: key files and endpoints (implementation locations)
+- Server bootstrap: server.js
+- Auth: auth.js
+  - `POST /api/auth/register`
+  - `GET /api/auth/verify/:token`
+  - `POST /api/auth/login`
+  - `POST /api/auth/logout`
+  - `POST /api/auth/forgotpassword`
+  - `POST /api/auth/resetpassword/:token`
+  - `GET /api/auth/user`
+- Stores: stores.js
+  - `POST /api/stores/create`
+  - `PUT /api/stores/:id/update-builder`
+  - `GET /api/stores/view/:subdomain`
+  - `GET /api/stores/me`
+- Products: products.js
+  - `POST /api/products` (multipart images)
+  - `PUT /api/products/:id`
+  - `GET /api/products`
+  - `GET /api/products/:id`
+  - `DELETE /api/products/:id`
+- Orders: orders.js
+  - `POST /api/orders/create-checkout-session`
+  - `GET /api/orders/` (store orders)
+  - `PUT /api/orders/:id/status`
+- Subscriptions: subscription.js
+  - `POST /api/subscription/create-checkout-session`
+  - `POST /api/subscription/verify` (testing bypass)
+  - `GET /api/subscription/test-prices`
+- AI Marketing: ai.js
+  - `POST /api/ai/campaign-ideas`
+  - `POST /api/ai/content-calendar`
+  - `POST /api/ai/trending`
+  - `POST /api/ai/ab-test`
+- Image enhancement: enhance.js
+  - `POST /api/enhance/image`
+  - Uses main.py and uploads to Cloudinary.
+- Creative generation: creative.js
+  - `POST /api/creative/generate`
+  - `GET /api/creative/platforms`
+  - Integrates HF, Gemini, Pollinations, Python enhancer, Cloudinary, and `sharp`.
+- Middleware:
+  - JWT auth: auth.js
+  - Subscription check: checkSubscription.js
+  - Upload + Cloudinary storage: upload.js
+- Models:
+  - User.js, Store.js, Product.js, Order.js
+- Python enhancement: main.py, pipeline.py, requirements.txt
+- Frontend:
+  - API client: api.js
+  - Creative UI: AICreativeGenerator.jsx
+  - Enhancer UI: ImageEnhancer.jsx
+  - Marketing UI: Marketing.jsx
+  - Other dashboard pages: `Products.jsx`, `Orders.jsx`, `StoreBuilder.jsx` in dashboard

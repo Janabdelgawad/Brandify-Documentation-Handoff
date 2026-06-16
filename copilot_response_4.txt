@@ -1,0 +1,102 @@
+**Executive Summary — Brandify (Implemented Features)**
+
+Purpose
+- Brandify is a modular SaaS prototype enabling small sellers to create a hosted storefront, manage products, accept payments, and produce commerce-ready marketing and imagery using integrated AI and an image enhancement pipeline. All statements below reflect implemented code.
+
+Core Delivered Capabilities
+- Authentication & user lifecycle
+  - Registration with email verification: `POST /api/auth/register` creates users, stores a verification token, and sends email via Nodemailer.
+  - Email verification endpoint: `GET /api/auth/verify/:token`.
+  - Login/logout and password reset: `POST /api/auth/login`, `POST /api/auth/logout`, `POST /api/auth/forgotpassword`, `POST /api/auth/resetpassword/:token`.
+  - JWT-based auth with tokens issued for 1 hour, accepted via httpOnly cookie `token` or `x-auth-token` header (middleware: auth.js).
+
+- Store management
+  - Create store: `POST /api/stores/create` creates a `Store` tied to the authenticated user (subdomain auto-derived).
+  - Store builder updates: `PUT /api/stores/:id/update-builder` updates `theme` and `sections` (navbar, hero, footer).
+  - Public store view: `GET /api/stores/view/:subdomain` returns store + products; optional `recordView=true` increments view counters.
+  - Owner store fetch: `GET /api/stores/me`.
+
+- Product catalog
+  - Full CRUD for products:
+    - Create: `POST /api/products` (multipart, up to 5 images) — images uploaded to Cloudinary via upload.js.
+    - Update: `PUT /api/products/:id` supports merging `existingImages` + new uploads and enforces per-store ownership.
+    - Read: `GET /api/products` (owner store list), `GET /api/products/:id` (public).
+    - Delete: `DELETE /api/products/:id`.
+  - Inventory field (`stock`) is present and updated when orders are created.
+
+- Orders & checkout
+  - Order creation + Stripe Checkout session: `POST /api/orders/create-checkout-session` saves an `Order` (status `pending`), decrements product stock, increments `store.sales`, and creates a Stripe Checkout session returning a redirect URL.
+  - Order listing and status updates for store owners: `GET /api/orders/` and `PUT /api/orders/:id/status`.
+  - Note: Stripe webhooks for payment reconciliation are not implemented (orders are saved as `pending` and require webhook reconciliation for finalization).
+
+- Subscription support
+  - Stripe subscription Checkout session creation: `POST /api/subscription/create-checkout-session`.
+  - A development/testing `POST /api/subscription/verify` endpoint exists that marks `User.subscriptionStatus = "active"` and sets `subscriptionEndDate` (explicit bypass used for testing).
+  - `User` model includes `subscriptionPlan`, `subscriptionStatus`, `stripeCustomerId`, `subscriptionEndDate`.
+
+- AI-driven marketing features
+  - Marketing endpoints implemented in ai.js using Groq SDK and programmatic prompts:
+    - `POST /api/ai/campaign-ideas` — generates campaign ideas.
+    - `POST /api/ai/content-calendar` — generates a 1- or 2-week dated content calendar.
+    - `POST /api/ai/trending` — returns trending formats, hooks and hashtags.
+    - `POST /api/ai/ab-test` — returns A/B test suggestions.
+  - Prompts incorporate store/product context (reads `Store`, `Product`, `Order` data).
+
+- Image enhancement pipeline
+  - Python-based enhancement under Enhancement:
+    - Background removal, shadow synthesis and compositing implemented in pipeline.py.
+    - main.py is the CLI wrapper invoked by server.
+    - Dependencies listed in requirements.txt (`rembg`, `Pillow`, `opencv-python`, `numpy`).
+  - API integration: `POST /api/enhance/image` (enhance.js) accepts multipart uploads, runs the Python pipeline, uploads result to Cloudinary, and returns `imageUrl`.
+
+- AI creative generator (end-to-end ad creative)
+  - `POST /api/creative/generate` (creative.js) implements a full pipeline that:
+    - Accepts product image + campaign parameters from frontend UI.
+    - Runs Python enhancement to produce a transparent product with shadow.
+    - Optionally analyzes product via Gemini Vision (if API key present) to extract a product description for prompts.
+    - Builds structured, style-aware prompts and calls a Hugging Face image model (`black-forest-labs/FLUX.1-dev`) to generate empty scene backgrounds; falls back to Pollinations if HF fails.
+    - Composites product into generated background via `sharp`, overlays offer/CTA using SVG, performs color adjustments, and uploads final creatives to Cloudinary.
+    - Uses rate-limiting (10/min) and exponential-backoff retries; returns creative URLs and metadata.
+  - Frontend page AICreativeGenerator.jsx implements the user flow: upload, parameter selection, submission, gallery, and download.
+
+- Frontend delivered pages and UX
+  - React + Vite SPA with Tailwind and Framer Motion.
+  - Key pages implemented: dashboard creative generator, image enhancer, marketing, products, orders, store builder, store preview, product details, checkout and order success pages.
+  - API client: api.js (axios with `withCredentials`) and automatic `x-auth-token` header injection from `localStorage`.
+
+- Observability & store analytics
+  - `GET /api/stats/` returns per-store metrics (product count, orders count, total sales, views, AOV, returning customers, onlineCustomers heuristic, conversionRate, weekly chart data) computed from DB aggregations.
+
+Security & infrastructure basics
+- HTTP header hardening: `helmet()` applied.
+- CORS configured in server.js for `http://localhost:5173` with credentials support.
+- JWT cookie is `httpOnly` and `sameSite: "strict"`, `secure` set in production.
+- Input validation via `express-validator` on auth endpoints.
+- Rate limiting implemented on login (5 attempts / 15 minutes) and creative generation (10/min).
+- Upload safety: Multer checks MIME types and size limits; Cloudinary used for storage.
+
+Third-party integrations (implemented)
+- Cloudinary for image storage and uploads.
+- Stripe for Checkout sessions (orders and subscriptions).
+- Groq LLM SDK for marketing generation.
+- Hugging Face inference (image generation) with Pollinations fallback.
+- Google Gemini Vision for image analysis (optional).
+- Nodemailer for email delivery.
+
+Concise limitations (implemented-state facts)
+- No Stripe webhook handler for payment/subscription reconciliation.
+- `mongoSanitize` / `xss-clean` middleware present but commented out (sanitization not active).
+- Subscription verification endpoint includes a development bypass that directly activates subscriptions.
+- AI subscription gating middleware (`checkSubscription`) exists but is not applied across all AI routes.
+
+Files & endpoints (quick reference)
+- Server entry: server.js
+- Auth: auth.js
+- Stores: stores.js
+- Products: products.js
+- Orders: orders.js
+- Subscriptions: subscription.js
+- AI marketing: ai.js
+- Image enhance: enhance.js + `Enhancement/*`
+- Creative generator: creative.js
+- Frontend key pages: AICreativeGenerator.jsx, ImageEnhancer.jsx, `Marketing.jsx`

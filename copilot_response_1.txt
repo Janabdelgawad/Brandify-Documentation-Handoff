@@ -1,0 +1,159 @@
+Below is the feature inventory derived strictly from the codebase.
+
+**Authentication & Authorization**
+- **Feature name:** User registration, email verification, login, logout, password reset, token-based auth  
+- **Business purpose:** Onboard users, protect account actions, enable session management for dashboard/store owners.  
+- **Technical implementation summary:** Express routes implement register/login/logout/forgot-password/reset/verify flows. Passwords hashed with `bcryptjs`. Email verification and password reset tokens generated with `crypto` and sent via `nodemailer`. JWTs issued and stored in HTTP-only cookie and `x-auth-token` header; `auth` middleware verifies JWT. Rate limiter guards login attempts.  
+- **Main files involved:** auth.js, auth.js, User.js  
+- **Routes/API endpoints involved:** `POST /api/auth/register`, `GET /api/auth/verify/:token`, `POST /api/auth/resend-verification`, `POST /api/auth/login`, `POST /api/auth/logout`, `POST /api/auth/forgotpassword`, `POST /api/auth/resetpassword/:token`, `GET /api/auth/user`  
+- **Database models involved:** `User` (User.js)  
+- **Frontend pages/components involved:** Register.jsx, Login.jsx, VerifyEmail.jsx, ForgotPassword.jsx, ResetPassword.jsx, auth usage in `AuthContext.jsx`  
+- **Third-party services used:** `nodemailer` (SMTP via env), JWT, `bcryptjs`, `express-rate-limit`  
+- **Current implementation status:** Implemented and wired to frontend; token expiry configured (1h) and server sets cookie.
+
+**Security**
+- **Feature name:** Basic HTTP hardening, CORS, rate limiting, auth checks, subscription guard  
+- **Business purpose:** Protect endpoints, limit abuse, validate access to premium features.  
+- **Technical implementation summary:** `helmet()` applied app-wide; `cors` configured for frontend origin; various `express-rate-limit` uses (login, creative generation); `auth` JWT middleware across protected routes; `checkSubscription` middleware enforces `User.subscriptionStatus === "active"` and expiry handling. Upload input filtering via multer `fileFilter`.  
+- **Main files involved:** server.js, auth.js, checkSubscription.js, route-specific rate limiters in creative.js and auth.js  
+- **Routes/API endpoints involved:** All protected endpoints use `auth` (see routes list); subscription-sensitive features expected to use `checkSubscription` (middleware file exists).  
+- **Database models involved:** `User`  
+- **Frontend pages/components involved:** Auth-protected dashboard pages (various `dashboard/*` pages), API client uses `withCredentials=true` and adds `x-auth-token`.  
+- **Third-party services used:** `helmet`, `express-rate-limit`, CORS, multer/cloudinary validations  
+- **Current implementation status:** Implemented; basic protections present. Some sanitizers commented out (`express-mongo-sanitize`, `xss-clean`) in server.js.
+
+**Store Builder**
+- **Feature name:** Create/manage storefront, theme & sections editing, publish/view store  
+- **Business purpose:** Allow users to create a store, customize visual theme and page sections, and publish a storefront.  
+- **Technical implementation summary:** `Store` model holds theme and `sections` (navbar/hero/footer) with structured fields. Routes allow creating store, updating builder config, getting current user's store, and viewing a store by `subdomain` (includes view counting and product listing). Frontend pages provide UI to create a store and builder components.  
+- **Main files involved:** stores.js, Store.js  
+- **Routes/API endpoints involved:** `POST /api/stores/create`, `PUT /api/stores/:id/update-builder`, `GET /api/stores/view/:subdomain`, `GET /api/stores/me`  
+- **Database models involved:** `Store` (Store.js)  
+- **Frontend pages/components involved:** CreateStore.jsx, StoreBuilder.jsx, StorePreview.jsx, builder components under `frontend/src/components/builder/*`  
+- **Third-party services used:** none specific to builder (data persisted to MongoDB)  
+- **Current implementation status:** Implemented (create, update sections, view). Publishing flag `isPublished` exists; frontend shows preview.
+
+**Product Management**
+- **Feature name:** Product CRUD, image uploads, product listing  
+- **Business purpose:** Let store owners add and manage products with images and inventory.  
+- **Technical implementation summary:** CRUD implemented via Express; images uploaded via multer configured with Cloudinary storage (`CloudinaryStorage`) in `middleware/upload.js`. `Product` model holds `images`, `image` (primary), category, price, stock. File upload limits and type checks enforced. Update route supports existing/new image merging and image count limit.  
+- **Main files involved:** products.js, upload.js, Product.js  
+- **Routes/API endpoints involved:** `POST /api/products` (create with `upload.array("images", 5)`), `PUT /api/products/:id` (update images), `GET /api/products` (list for current store), `GET /api/products/:id`, `DELETE /api/products/:id`  
+- **Database models involved:** `Product` (Product.js), references `Store`  
+- **Frontend pages/components involved:** Products.jsx, product edit forms/components in `components/*`, ProductDetails.jsx (storefront)  
+- **Third-party services used:** Cloudinary (via `cloudinary` + `multer-storage-cloudinary`), multer, image validation.  
+- **Current implementation status:** Implemented with Cloudinary-backed uploads and frontend integration.
+
+**Order Management**
+- **Feature name:** Create and manage orders, stock decrement, store sales tracking  
+- **Business purpose:** Capture customer purchases, reduce product stock, and track store revenue.  
+- **Technical implementation summary:** `Order` model stores `customer` info, items, totals, and `status`. `orders.create-checkout-session` route saves a new Order (status pending), decrements product stock, increments store sales, then creates a Stripe Checkout session (payment). Order retrieval and status updates are available in dashboard route(s).  
+- **Main files involved:** orders.js, Order.js, Product.js, Store.js  
+- **Routes/API endpoints involved:** `POST /api/orders/create-checkout-session` (creates order + Stripe session), `GET /api/orders` (store owner orders list), `PUT /api/orders/:id/status` (update order status)  
+- **Database models involved:** `Order`, references `Product` and `Store`  
+- **Frontend pages/components involved:** Checkout.jsx, OrderSuccess.jsx, dashboard Orders page Orders.jsx  
+- **Third-party services used:** Stripe (server-side via `stripe` library). `create-checkout-session` uses `stripe.checkout.sessions.create`.  
+- **Current implementation status:** Implemented; session creation returns `session.url`. No visible webhook handling in repo (so post-payment order finalization/webhook not present — order remains pending until client or manual verification).
+
+**Payment Processing**
+- **Feature name:** Customer checkout payments + subscription checkout (Stripe)  
+- **Business purpose:** Accept payments for orders and sell subscription plans for access to premium features.  
+- **Technical implementation summary:** Two Stripe integrations: orders flow uses `stripe.checkout.sessions.create` for one-off payments; subscription.js uses Stripe Checkout to create subscription sessions with price IDs (test keys present). A `verify` endpoint exists to bypass Stripe for testing (sets user subscription active and assigns end date). No webhook handlers detected.  
+- **Main files involved:** orders.js, subscription.js, User.js  
+- **Routes/API endpoints involved:** `POST /api/orders/create-checkout-session`, `POST /api/subscription/create-checkout-session`, `POST /api/subscription/verify`, `GET /api/subscription/test-prices`  
+- **Database models involved:** `Order`, `User` (subscription fields), `Store` (sales)  
+- **Frontend pages/components involved:** Checkout.jsx, Pricing.jsx, subscription flows in dashboard (UI not fully centralized in a single file).  
+- **Third-party services used:** Stripe (server key used directly in routes), environment keys in `.env`.  
+- **Current implementation status:** Basic checkout flows implemented; subscription activation includes a test bypass endpoint. Stripe webhooks not present (no server-side webhook handling or automatic subscription status sync).
+
+**AI Marketing Tools**
+- **Feature name:** Campaign ideas, content calendar, trending suggestions, A/B test ideas (LLM-driven)  
+- **Business purpose:** Provide store owners with AI-generated marketing copy, calendars, and growth ideas to boost sales.  
+- **Technical implementation summary:** ai.js builds contextual prompts (uses store/products/orders context), calls an LLM via `groq-sdk` (Groq chat completions with `llama-3.1-8b-instant` in code). Several endpoints create different marketing outputs. Frontend Marketing.jsx calls these endpoints and renders Markdown.  
+- **Main files involved:** ai.js, Marketing.jsx  
+- **Routes/API endpoints involved:** `POST /api/ai/campaign-ideas`, `POST /api/ai/content-calendar`, `POST /api/ai/trending`, `POST /api/ai/ab-test`  
+- **Database models involved:** `Store`, `Product`, `Order` (for context)  
+- **Frontend pages/components involved:** Marketing.jsx  
+- **Third-party services used:** Groq SDK (Groq chat), environment key `GROQ_API_KEY`. Optionally uses Markdown rendering libs on frontend.  
+- **Current implementation status:** Implemented server + frontend; environment-dependent (requires `GROQ_API_KEY`).
+
+**AI Creative Generator (Ad Creative Composer)**
+- **Feature name:** Generate background scenes, remove product background, composite product + CTA + typography, deliver downloadable creatives  
+- **Business purpose:** Produce ready-to-run ad creatives that preserve product identity and place it in premium AI-generated backgrounds with CTAs.  
+- **Technical implementation summary:** Multi-step pipeline in [backend/routes/creative.js]:
+  - Accepts product image (Multer memory storage).
+  - Calls local Python enhancement (main.py) to remove background and produce transparent product (via `runEnhancement` and `rembg` pipeline).
+  - Uploads the reference image to Cloudinary.
+  - Calls image generation APIs (primary: Hugging Face FLUX model via HF API; fallback: Pollinations). Also analyzes product with Google Gemini Vision (via REST).  
+  - Uses `sharp` to composite generated background + resized transparent product + SVG overlay (offer/CTA).
+  - Upload final creative to Cloudinary and return URLs.
+  - Rate-limited and uses exponential backoff for retry; parallel generation with Promise.allSettled.  
+- **Main files involved:** creative.js, creative.js (module copy/variant), main.py, pipeline.py, AICreativeGenerator.jsx  
+- **Routes/API endpoints involved:** `POST /api/creative/generate`, `GET /api/creative/platforms`  
+- **Database models involved:** None directly (ad generation is transient); `User` auth required.  
+- **Frontend pages/components involved:** AICreativeGenerator.jsx  
+- **Third-party services used:** Hugging Face API (`HF_API_KEY`), Pollinations fallback, Cloudinary (uploads), Google Gemini Vision (`GEMINI_API_KEY`), `sharp`, Python `rembg` and OpenCV pipeline, `axios` for HTTP, Framer Motion on frontend.  
+- **Current implementation status:** Fully implemented end-to-end from frontend to final Cloudinary upload; external API keys required. There is also a module copy under AI-Creative-Generator mirroring the route (duplicate/alternate entry).
+
+**AI Image Enhancement**
+- **Feature name:** Background removal, shadow synthesis, studio background generation, export to Cloudinary  
+- **Business purpose:** Convert raw product images into studio-grade assets (transparent or styled backgrounds) for product pages and creative compositing.  
+- **Technical implementation summary:** Node routes (`/api/enhance/image`) receive an image and bg choice, spawn the Python enhancement pipeline (main.py → `enhancer.pipeline.ProductEnhancer`). Pipeline uses `rembg` (ISNet), Pillow, CV2 to remove background, crop, synthesize shadows, generate backgrounds, and save processed image. Result uploaded to Cloudinary by Node route and URL returned to frontend. Frontend ImageEnhancer.jsx uploads image and displays before/after.  
+- **Main files involved:** enhance.js, main.py, pipeline.py, ImageEnhancer.jsx  
+- **Routes/API endpoints involved:** `POST /api/enhance/image`  
+- **Database models involved:** none  
+- **Frontend pages/components involved:** ImageEnhancer.jsx  
+- **Third-party services used:** Cloudinary, Python packages (`rembg`, `Pillow`, `opencv-python`), local Python runtime (optionally venv at Enhancement/.venv).  
+- **Current implementation status:** Implemented; requires Python environment with dependencies. Node routes fallback to system `python` if venv missing.
+
+**Subscription System**
+- **Feature name:** Plan purchase (Stripe), local activation (test verify), subscription fields & enforcement  
+- **Business purpose:** Gate premium features (e.g., AI creative/enhancer) behind paid plans.  
+- **Technical implementation summary:** subscription.js creates Stripe Checkout sessions and provides a `/verify` endpoint to mark a user active for testing. `User` model contains `subscriptionPlan`, `subscriptionStatus`, `subscriptionEndDate`, and `stripeCustomerId`. `checkSubscription` middleware checks `subscriptionStatus` and expiry.  
+- **Main files involved:** subscription.js, User.js, checkSubscription.js  
+- **Routes/API endpoints involved:** `POST /api/subscription/create-checkout-session`, `POST /api/subscription/verify`, `GET /api/subscription/test-prices`  
+- **Database models involved:** `User`  
+- **Frontend pages/components involved:** Pricing.jsx (checkout initiation), dashboard subscription flows (not centralized)  
+- **Third-party services used:** Stripe, `checkSubscription` server-side enforcement  
+- **Current implementation status:** Implemented basic flows; webhook-based automation missing; `/verify` acts as a dev/test bypass to activate subscriptions.
+
+**Storefront (Public)**
+- **Feature name:** Public store view, product listing, view counting  
+- **Business purpose:** Present stores and products to customers via subdomain-style routing.  
+- **Technical implementation summary:** `GET /api/stores/view/:subdomain` returns store data and products; accepts `recordView=true` to increment `views`. Products are returned with store data. Frontend store preview page consumes this. Checkout flow uses `storeSubdomain` to locate store before creating order/Stripe session.  
+- **Main files involved:** stores.js, orders.js, StorePreview.jsx, ProductDetails.jsx  
+- **Routes/API endpoints involved:** `GET /api/stores/view/:subdomain`  
+- **Database models involved:** `Store`, `Product`  
+- **Frontend pages/components involved:** StorePreview.jsx, ProductDetails.jsx, checkout pages  
+- **Third-party services used:** Stripe used in checkout (orders route).  
+- **Current implementation status:** Implemented; basic storefront exists.
+
+**Admin Dashboard**
+- **Feature name:** Seller dashboard for products, orders, store settings, AI tools  
+- **Business purpose:** Provide merchants with management UI to run their store and marketing.  
+- **Technical implementation summary:** Frontend React pages under `frontend/src/pages/dashboard/*` implement UI: DashboardHome.jsx, Products.jsx, Orders.jsx, StoreBuilder.jsx, CreateStore.jsx, AICreativeGenerator.jsx, ImageEnhancer.jsx, Marketing.jsx. They call the API endpoints described above using api.js. `ProtectedRoute.jsx` enforces auth on frontend routes.  
+- **Main files involved:** `frontend/src/pages/dashboard/*`, ProtectedRoute.jsx, AuthContext.jsx  
+- **Routes/API endpoints involved:** All protected API endpoints (`/api/products`, `/api/orders`, `/api/stores`, `/api/creative`, `/api/enhance`, `/api/ai`, `/api/subscription` etc.)  
+- **Database models involved:** `User`, `Store`, `Product`, `Order`  
+- **Frontend pages/components involved:** Dashboard pages and builder/components in components  
+- **Third-party services used:** none specific to admin UI beyond services used by backend features  
+- **Current implementation status:** Implemented UI pages for core flows; requires backend services and API keys.
+
+**Deployment & Infrastructure**
+- **Feature name:** Environment configuration, external integrations, static/frontend dev server assumption  
+- **Business purpose:** Host server, integrate external services, enable local dev.  
+- **Technical implementation summary:** server.js bootstraps Express, reads `.env` via `dotenv`. Integrations require env variables: Cloudinary, Stripe keys, HF API key, Gemini API key, GROQ API key, email host/user/pass. Frontend uses Vite dev server (vite config present) and communicates with backend at `http://localhost:5000/api`. Python Enhancement module expected to run locally (optionally venv in Enhancement/.venv). No Docker/K8s or CI files present. No webhook endpoints for Stripe found.  
+- **Main files involved:** server.js, upload.js, package.json, package.json, requirements.txt  
+- **Routes/API endpoints involved:** n/a (infrastructure-level)  
+- **Database models involved:** n/a  
+- **Frontend pages/components involved:** n/a  
+- **Third-party services used:** Cloudinary, Stripe, Hugging Face, Google Gemini, Groq, Nodemailer SMTP, MongoDB (via `connectDB` in db.js), Framer Motion, Tailwind, Vite  
+- **Current implementation status:** Local development configuration present; environment keys required. No CI/CD scripts or webhook handlers included.
+
+Notes / Observations (strictly from codebase)
+- Email sending via `nodemailer` is configured to use env-driven SMTP but sender address is hard-coded in mail options.  
+- Two copies/variants of the creative route exist: creative.js and creative.js (nearly identical) — code duplication or moduleized sample.  
+- Stripe is used in both order checkout and subscriptions, but webhook processing (to reconcile session completions) is absent; the `/subscription/verify` endpoint functions as a manual/test activation.  
+- The Enhancement pipeline is implemented in Python with `rembg` ISNet session and must be available on the host; Node spawns Python processes and falls back to system python if `.venv` not present.  
+- Several security middlewares (`express-mongo-sanitize`, `xss-clean`) are present but commented out in server.js.  
+- External LLM usage varies: Groq for marketing LLMs, Hugging Face (FLUX) for image generation, Gemini for vision; environment variables required.
