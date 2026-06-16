@@ -1,0 +1,190 @@
+\section{System Design and Modeling}
+
+\subsection{Use Case Diagrams}
+
+The Use Case Diagram illustrates the interaction between the two primary actors and the core system components, including the integrated AI engine. It provides a high-level view of how users engage with the platform and how responsibilities are distributed across the system.
+
+\textbf{Actors:}
+\begin{itemize}
+    \item \textbf{Merchant (Admin):} The small business owner responsible for managing the online store.
+    \item \textbf{Customer:} The end-user who browses the storefront and completes purchases.
+    \item \textbf{AI Service:} A background system component responsible for processing images and generating marketing content.
+\end{itemize}
+
+\textbf{Main Use Cases:}
+\begin{itemize}
+    \item \textbf{Register / Login:} Accessing the platform.
+    \item \textbf{Manage Products:} Adding and editing items, including image enhancement.
+    \item \textbf{Generate Marketing:} Requesting AI-generated ad copy and captions.
+    \item \textbf{Customize Store:} Modifying the store’s look and feel.
+    \item \textbf{View Orders:} Managing incoming sales.
+    \item \textbf{Browse \& Purchase:} Browsing products and completing checkout.
+\end{itemize}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=1\textwidth,height=15cm]{assets/usecase1.png}
+    \caption{Use Case Diagram for the SaaS Builder Platform}
+\end{figure}
+ % --------------------------------
+\newpage
+\subsection{System Design and Modeling}
+
+This section presents the detailed design of the proposed AI-Driven E-Commerce and Marketing Platform. The system design is described using standard UML and data modeling diagrams to ensure clarity, consistency, and traceability between functional requirements and system implementation.  
+
+The design emphasizes modularity, scalability, and seamless integration of artificial intelligence to support marketing intelligence, automation, and store optimization.
+
+\subsection{Entity-Relationship Diagram (ERD)}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth,height=20cm]{assets/sequencediagram1.png}
+    \caption{Entity-Relationship Diagram (ERD)}
+\end{figure}
+
+The figure presents the Entity-Relationship Diagram (ERD), which defines the logical structure of the system’s database and the relationships among its core entities.
+
+\textbf{Core Entities:}
+\begin{itemize}
+    \item \textbf{STORE\_OWNER:} Represents merchants who create and manage stores on the platform.
+    \item \textbf{STORE:} Contains store-related information and is owned by a single store owner.
+    \item \textbf{PRODUCT:} Represents products offered by a store, including pricing and inventory data.
+    \item \textbf{CUSTOMER:} Represents end users who browse products and place orders.
+    \item \textbf{CART} and \textbf{CART\_ITEM:} Handle temporary storage of customer-selected products prior to checkout.
+    \item \textbf{ORDER} and \textbf{ORDER\_ITEM:} Store finalized purchase transactions and associated product details.
+    \item \textbf{PAYMENT:} Maintains payment-related information linked to each order.
+    \item \textbf{MARKETING\_INSIGHT:} Stores AI-generated marketing outputs, including campaign performance metrics and A/B testing results.
+\end{itemize}
+
+\textbf{Relationships:}
+\begin{itemize}
+    \item A store owner can own multiple stores.
+    \item Each store can contain multiple products.
+    \item Customers can place multiple orders, each consisting of multiple order items.
+    \item Each order is associated with exactly one payment.
+    \item Marketing insights are generated per store to enable performance tracking and optimization.
+\end{itemize}
+ % --------------------------------
+ \subsection{Sequence Diagrams}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=1\textwidth, height=21cm]{assets/sequencediagram2.png}
+    \caption{Sequence Diagram of Core System Interactions}
+\end{figure}
+
+The sequence diagram illustrates the dynamic interaction between system components during key business processes, including store creation, product management, AI-driven marketing, customer purchasing, and analytics feedback.
+
+\textbf{Store Owner Interaction Flow:}  
+The process begins with the store owner authenticating through the frontend interface. Authentication requests are validated by the backend using the database. Once authenticated, the store owner submits store details, which are processed by the backend and enriched through communication with the AI Marketing Intelligence Engine to generate data-driven templates and layout suggestions. The finalized store data is then persisted in the database.
+
+\textbf{Product Management Flow:}  
+The store owner adds products through the frontend, with product data handled by the backend. Product images are stored in cloud storage to ensure scalability, while product metadata is saved in the database for analytics, marketing, and customer browsing.
+
+\textbf{AI Marketing Intelligence Flow:}  
+The backend periodically forwards aggregated sales, product, and engagement data to the AI engine. The AI analyzes this data to generate campaign ideas, content calendars, trending suggestions, and A/B testing recommendations. Generated insights are returned to the backend and stored for merchant review.
+
+\textbf{Customer Purchase Flow:}  
+Customers browse products via the frontend, with requests served by the backend. During checkout, orders are processed and forwarded to the payment gateway. Upon successful payment, order details are stored in the database and confirmation is returned to the customer.
+
+\textbf{Analytics Feedback Loop:}  
+System logs and analytics data are continuously stored and shared with the AI engine, enabling ongoing optimization of marketing strategies and overall system performance.
+ % --------------------------------
+ \newpage
+ \subsection{UML Class Diagram}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=1\textwidth, height=20cm]{assets/umldiagram4.png}
+    \caption{UML Class Diagram of the System}
+\end{figure}
+
+The UML class diagram models the object-oriented structure of the system, defining core classes, their responsibilities, and interactions within the platform.
+
+\textbf{Core Classes:}
+\begin{itemize}
+    \item \textbf{StoreOwner:} Manages store creation, product administration, and analytics access.
+    \item \textbf{Store:} Represents an individual online store and its associated metadata.
+    \item \textbf{Product:} Encapsulates product attributes and update operations.
+    \item \textbf{Customer:} Supports browsing, cart management, and order placement.
+    \item \textbf{Cart} and \textbf{CartItem:} Handle customer-selected products prior to checkout.
+    \item \textbf{Order} and \textbf{OrderItem:} Represent finalized purchase transactions.
+    \item \textbf{Payment:} Manages payment processing logic.
+    \item \textbf{AIMarketingIntelligenceEngine:} Performs data analysis, campaign generation, content planning, and A/B test recommendations.
+    \item \textbf{MarketingInsight:} Stores AI-generated marketing outputs.
+\end{itemize}
+
+\textbf{Design Considerations:}
+\begin{itemize}
+    \item Clear separation of concerns across system components
+    \item Reusability of core business entities
+    \item Loose coupling between AI services and business logic
+    \item Extensibility to support future system enhancements
+\end{itemize}
+ % --------------------------------
+ \newpage
+ \subsection{Data Flow Diagrams (DFD)}
+
+Data Flow Diagrams (DFDs) illustrate how data moves through the system, how it is processed, and where it is stored. In this project, DFDs are presented at two levels: Level 0 (Context Diagram) and Level 1, providing both a high-level overview and a detailed functional decomposition of the platform.
+
+\subsubsection{DFD Level 0 (Context Diagram)}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=1\textwidth, height=6cm]{assets/DFD0.png}
+    \caption{DFD Level 0 (Context Diagram)}
+\end{figure}
+
+The DFD Level 0 represents the AI E-Commerce Platform as a single unified process and defines its interaction with external entities, clearly establishing the system boundary.
+
+\textbf{External Entities:}
+\begin{itemize}
+    \item \textbf{Store Owner:} Submits store and product data and receives AI-generated marketing insights.
+    \item \textbf{Customer:} Places orders and receives order confirmations.
+    \item \textbf{Payment Gateway:} Processes payments and returns payment status.
+    \item \textbf{Social Media Platforms:} Receive advertising content and return engagement data.
+\end{itemize}
+
+\textbf{Data Flows:}
+\begin{itemize}
+    \item Store owners exchange store and product data for AI-generated insights.
+    \item Customers submit orders and receive confirmations.
+    \item Payment requests are sent to the payment gateway, which returns payment status.
+    \item Advertising content is published to social platforms, and engagement data is collected for analytics.
+\end{itemize}
+ % --------------------------------
+\subsubsection{DFD Level 1 (Detailed Diagram)}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=1\textwidth, height=10cm]{assets/DFD1.png}
+    \caption{DFD Level 1 (Detailed Diagram)}
+\end{figure}
+
+The DFD Level 1 decomposes the system into its core internal processes, data stores, and detailed data flows, providing greater visibility into internal operations.
+
+\textbf{Core Processes:}
+\begin{itemize}
+    \item \textbf{User Authentication:} Validates store owner credentials against the User Database.
+    \item \textbf{Store \& Product Management:} Handles store creation and product data storage.
+    \item \textbf{Order \& Payment Processing:} Manages customer orders and payment interactions.
+    \item \textbf{AI Marketing Intelligence:} Analyzes sales and performance data to generate marketing insights.
+    \item \textbf{Analytics \& Feedback:} Collects performance metrics and feeds optimized data back into the AI engine.
+\end{itemize}
+
+\textbf{Data Stores:}
+\begin{itemize}
+    \item User Database
+    \item Product Database
+    \item Order Database
+    \item Marketing Insights Store
+\end{itemize}
+
+\textbf{Data Flow Description:}
+\begin{itemize}
+    \item Login data flows from the store owner to authentication and is validated against the user database.
+    \item Product data flows to store and product management and is stored in the product database.
+    \item Order requests flow from customers to order processing, interact with the payment gateway, and are stored in the order database.
+    \item Sales and performance data are analyzed by the AI engine to generate marketing insights.
+    \item Marketing recommendations are returned to store owners, while performance data supports continuous AI optimization.
+\end{itemize}
